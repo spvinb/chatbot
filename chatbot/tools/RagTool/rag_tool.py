@@ -24,7 +24,7 @@ qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, chain_type=
 @tool("weather_data_retrieval", return_direct=True)
 def weather_data_retrieval(question: str) -> str:
     """
-    Use this tool to retrieve weather-related data.
+    Call this tool to retrieve weather-related data.
     - Handles queries requiring weather information, such as forecasts, conditions, and recommendations.
     - Retrieves relevant information from the ChromaDB vector database and formats it appropriately.
     """
