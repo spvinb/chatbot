@@ -4,3 +4,4 @@ openai
 chromadb
 Langchain_openai
 langchain_chroma
+spacy
