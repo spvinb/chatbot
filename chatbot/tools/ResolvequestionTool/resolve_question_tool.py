@@ -1,57 +1,69 @@
+import spacy
 from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
+from dateutil import parser
+import re
 from langchain.agents import tool
 
-@tool("resolve_question_tool", return_direct=True)
-def resolve_question_tool(question: str) -> str:
-    """
-    Resolves relative date and time references (e.g., 'next week', 'tomorrow', 'in 3 days') into absolute dates.
-    - Parses the user's question and replaces relative references with exact dates.
-    - Supports day-based (e.g., 'next 2 days'), week-based (e.g., 'next week'), and month-based (e.g., 'next month') resolutions.
-    """
+# Load spaCy NLP model
+nlp = spacy.load("en_core_web_sm")
 
-    # Today's date
+@tool("resolve_relative_date_tool", return_direct=True)
+def resolve_relative_date_tool(question: str) -> str:
+    """
+    Call this tool to resolve relative date and time references in user queries to absolute dates.
+    """
+    
     today = datetime.now()
 
-    # Helper function to calculate date ranges
-    def resolve_date_reference(reference: str):
-        if "today" in reference.lower():
-            return today.strftime("%Y-%m-%d")
-        elif "tomorrow" in reference.lower():
-            return (today + timedelta(days=1)).strftime("%Y-%m-%d")
-        elif "next week" in reference.lower():
-            start = today + timedelta(days=(7 - today.weekday()))
-            end = start + timedelta(days=6)
-            return f"{start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')}"
-        elif "next month" in reference.lower():
-            start = (today + relativedelta(months=1)).replace(day=1)
-            end = (start + relativedelta(months=1)) - timedelta(days=1)
-            return f"{start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')}"
-        elif "next" in reference.lower() and "days" in reference.lower():
-            num_days = int(reference.lower().split("next")[1].split("days")[0].strip())
-            start = today + timedelta(days=1)
-            end = today + timedelta(days=num_days)
-            return f"{start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')}"
-        else:
+    # Helper function to resolve a single date phrase using dateutil
+    def resolve_phrase(phrase: str):
+        try:
+            resolved_date = parser.parse(phrase, default=today)
+            return resolved_date.strftime("%Y-%m-%d")
+        except (ValueError, OverflowError):
             return None
 
-    # Parse the question for date references
+    # Parse the question with spaCy
+    doc = nlp(question)
     resolved_question = question
-    if "next" in question.lower() or "tomorrow" in question.lower() or "today" in question.lower():
-        # Identify and resolve time references
-        phrases = ["today", "tomorrow", "next week", "next month"]
-        for phrase in phrases:
-            if phrase in question.lower():
-                resolved_date = resolve_date_reference(phrase)
-                if resolved_date:
-                    resolved_question = resolved_question.replace(phrase, resolved_date)
-        # Handle "next X days"
-        if "next" in question.lower() and "days" in question.lower():
-            start_idx = question.lower().find("next")
-            end_idx = question.lower().find("days") + len("days")
-            phrase = question[start_idx:end_idx]
-            resolved_date = resolve_date_reference(phrase)
+
+    # Custom regular expressions for certain common date-related expressions
+    def resolve_custom_phrases(question: str, today: datetime) -> str:
+        # Patterns for common relative date expressions
+        patterns = {
+            r"next week": 7,  # "next week" means 7 days from today
+            r"in (\d+) days": lambda match: int(match.group(1)),  # Extracts "in X days"
+            r"(\d+) days later": lambda match: int(match.group(1)),  # Matches "X days later"
+            r"tomorrow": 1,  # "tomorrow" means 1 day from today
+            r"yesterday": -1,  # "yesterday" means 1 day before today
+            r"last Monday": -7,  # Assumes last Monday is exactly 7 days ago
+            r"next Monday": 7,  # Next Monday (7 days from today)
+            r"this Friday": 5,  # Adjust as per current weekday
+        }
+        
+        for pattern, value in patterns.items():
+            match = re.search(pattern, question, re.IGNORECASE)
+            if match:
+                days = value(match) if callable(value) else value
+                resolved_date = (today + timedelta(days=days)).strftime("%Y-%m-%d")
+                question = re.sub(pattern, resolved_date, question, flags=re.IGNORECASE)
+        
+        return question
+
+    # Apply custom temporal phrase resolution
+    resolved_question = resolve_custom_phrases(resolved_question, today)
+
+    # Now, apply spaCy's NER for more complex temporal entities
+    for ent in doc.ents:
+        if ent.label_ == "DATE":
+            resolved_date = resolve_phrase(ent.text)
             if resolved_date:
-                resolved_question = resolved_question.replace(phrase, resolved_date)
+                resolved_question = resolved_question.replace(ent.text, resolved_date)
 
     return resolved_question
+
+
+# # Test the function
+# if __name__ == "__main__":
+#     query = input("Enter the query:\n")
+#     print(resolve_relative_date_tool(query))

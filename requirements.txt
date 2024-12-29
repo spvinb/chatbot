@@ -4,3 +4,5 @@ openai
 chromadb
 Langchain_openai
 langchain_chroma
+python-dotenv
+spacy
